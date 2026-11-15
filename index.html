@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Letter Jump Adventure</title>
+<style>
+:root{--bg:#fff6e0;--ink:#1d3b34;--card:#ffffff;--muted:#5d7a72;--accent:#ff7a3d;--teal:#1f8a70;--line:#e3d6b4;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10231f;--ink:#f3ecd6;--card:#17332d;--muted:#9bb8ae;--line:#2c4d45}}
+:root[data-theme="dark"]{--bg:#10231f;--ink:#f3ecd6;--card:#17332d;--muted:#9bb8ae;--line:#2c4d45}
+*{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Trebuchet MS","Segoe UI",Verdana,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:16px}
+h1,.big{font-family:"Arial Rounded MT Bold","Trebuchet MS",Verdana,sans-serif;letter-spacing:.5px}
+#wrap{width:100%;max-width:860px;position:relative}
+canvas{width:100%;height:auto;display:block;border-radius:18px;border:3px solid var(--ink);background:#bfe8f5}
+.hud{display:flex;justify-content:space-between;gap:8px;font-weight:700;margin:0 4px 8px;flex-wrap:wrap}
+.hud span{background:var(--card);border:2px solid var(--line);border-radius:999px;padding:4px 14px}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;border-radius:18px;background:rgba(16,35,31,.82);color:#fff6e0}
+.overlay.hide{display:none}
+.overlay h1{font-size:clamp(34px,7vw,64px);margin:0 0 6px;color:#ffd85e;text-shadow:3px 3px 0 #ff7a3d;line-height:1.05}
+.overlay p{margin:6px 0 18px;font-size:clamp(14px,2.4vw,18px);max-width:480px}
+button{font:inherit;font-weight:800;font-size:22px;border:0;border-radius:999px;padding:12px 44px;background:var(--accent);color:#fff;cursor:pointer;box-shadow:0 5px 0 #c24f1a}
+button:active{transform:translateY(3px);box-shadow:0 2px 0 #c24f1a}
+button:focus-visible,a:focus-visible{outline:3px solid #ffd85e;outline-offset:3px}
+.overlay a{color:#ffd85e;margin-top:20px;font-weight:700}
+#kb{display:flex;gap:6px;justify-content:center;margin:14px 0 6px}
+.key{width:clamp(34px,9vw,60px);height:clamp(40px,10vw,64px);border-radius:10px;border:3px solid var(--ink);background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:clamp(16px,4vw,26px);opacity:.35;transition:transform .1s}
+.key small{font-size:10px;font-weight:600;color:var(--muted)}
+.key.on{opacity:1}
+.key.target{transform:translateY(-6px);box-shadow:0 0 0 4px #ffd85e}
+.key.bump::after{content:"";width:14px;height:3px;background:var(--ink);border-radius:2px;margin-top:2px}
+#tip{color:var(--muted);font-size:14px;text-align:center;margin:4px 0}
+.medal{font-size:64px;line-height:1}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="hud"><span id="hTrack">Track 1</span><span id="hDist">0 / 250 m</span><span id="hStum">Stumbles: 0</span></div>
+  <canvas id="c" width="800" height="360" aria-label="Letter Jump Adventure game"></canvas>
+  <div id="menu" class="overlay">
+    <h1>Letter Jump Adventure</h1>
+    <p>Run down the trail and press the letter on each obstacle to jump over it.</p>
+    <button id="play">Play</button>
+    <a href="https://typinggamesfree.io" target="_blank" rel="noopener">More free typing games at typinggamesfree.io</a>
+  </div>
+  <div id="pause" class="overlay hide">
+    <h1>Paused</h1><p>Rest your fingers on the home row.</p>
+    <button id="resume">Resume</button>
+  </div>
+  <div id="done" class="overlay hide">
+    <div class="medal" id="dMedal"></div>
+    <h1 id="dTitle">Track complete!</h1>
+    <p id="dText"></p>
+    <button id="next">Next track</button>
+    <a href="https://typinggamesfree.io" target="_blank" rel="noopener">More free typing games at typinggamesfree.io</a>
+  </div>
+  <div id="kb" aria-hidden="true"></div>
+  <div id="tip">Press the letter on the next obstacle. Esc pauses the run.</div>
+</div>
+<script>
+(function(){
+var cv=document.getElementById('c'),g=cv.getContext('2d');
+var $=function(i){return document.getElementById(i)};
+var ROW="asdfjkl;".split(""),FING={a:"Left pinky",s:"Left ring",d:"Left middle",f:"Left index",j:"Right index",k:"Right middle",l:"Right ring",";":"Right pinky"};
+var COL={a:"#ff6b6b",s:"#ff9f43",d:"#ffd43b",f:"#51cf66",j:"#22b8cf",k:"#4c8dff",l:"#9775fa",";":"#f06595"};
+var TRACKS=[{k:"fj",len:250},{k:"dfjk",len:350},{k:"sdfjkl",len:450},{k:"asdfjkl;",len:550}];
+var GY=285,RX=150,PX=20;
+var mode="menu",ti=0,world=0,speed=230,dist=0,stum=0,stumT=0,jumpT=0,obs=[],t0=0,last=0,flash=0,pops=[];
+var kbEl=$('kb'),keyEls={};
+ROW.forEach(function(k){var d=document.createElement('div');d.className='key'+(k=='f'||k=='j'?' bump':'');d.innerHTML=(k==';'?';':k.toUpperCase())+'<small>'+FING[k].replace('Left ','L ').replace('Right ','R ')+'</small>';d.style.borderColor=COL[k];kbEl.appendChild(d);keyEls[k]=d;});
+
+function build(){
+  var T=TRACKS[ti],n=Math.floor(T.len*PX/300),x=700,prev="";obs=[];
+  for(var i=0;i<n;i++){var k;do{k=T.k.charAt(Math.floor(Math.random()*T.k.length));}while(k==prev&&T.k.length>1);prev=k;obs.push({x:x,k:k,s:"wait"});x+=290+Math.random()*60;}
+}
+function start(i){
+  ti=i;build();world=0;dist=0;stum=0;stumT=0;jumpT=0;pops=[];speed=230;
+  ROW.forEach(function(k){keyEls[k].classList.toggle('on',TRACKS[ti].k.indexOf(k)>-1);keyEls[k].classList.remove('target');});
+  $('hTrack').textContent="Track "+(ti+1);hud();
+  ["menu","pause","done"].forEach(function(o){$(o).classList.add('hide')});
+  mode="play";last=performance.now();requestAnimationFrame(loop);
+}
+function hud(){$('hDist').textContent=Math.min(Math.floor(dist),TRACKS[ti].len)+" / "+TRACKS[ti].len+" m";$('hStum').textContent="Stumbles: "+stum;}
+function target(){for(var i=0;i<obs.length;i++){if(obs[i].s=="wait"&&obs[i].x-world+RX>RX-30)return obs[i];}return null;}
+function trip(){stum++;stumT=1;flash=.3;hud();}
+
+document.addEventListener('keydown',function(e){
+  if(e.key=="Escape"){if(mode=="play"){mode="pause";$('pause').classList.remove('hide');}else if(mode=="pause")resume();return;}
+  if((e.key=="Enter"||e.key==" ")&&mode=="menu"){start(0);e.preventDefault();return;}
+  if(mode!="play"||e.ctrlKey||e.metaKey||e.altKey)return;
+  var k=e.key.toLowerCase();if(ROW.indexOf(k)<0)return;
+  e.preventDefault();
+  var o=target();if(!o)return;
+  if(o.k==k){o.s="clear";jumpT=.55;pops.push({x:o.x,t:0,c:COL[k]});}
+  else if(TRACKS[ti].k.indexOf(k)>-1||true){trip();}
+});
+function resume(){if(mode!="pause")return;mode="play";$('pause').classList.add('hide');last=performance.now();requestAnimationFrame(loop);}
+$('play').onclick=function(){start(0)};
+$('resume').onclick=resume;
+$('next').onclick=function(){start(ti<TRACKS.length-1?ti+1:0)};
+
+function finish(){
+  mode="done";
+  var gold=stum==0,silver=stum>0&&stum<=3;
+  $('dMedal').textContent=gold?"🥇":silver?"🥈":"🏅";
+  $('dTitle').textContent=gold?"Gold medal! No stumbles!":"Track complete!";
+  $('dText').textContent="You ran "+TRACKS[ti].len+" m with "+stum+" stumble"+(stum==1?"":"s")+(gold?". Perfect run!":". Finish without a stumble to earn the gold medal.");
+  $('next').textContent=ti<TRACKS.length-1?"Next track":"Play again";
+  $('done').classList.remove('hide');
+}
+
+function loop(now){
+  if(mode!="play")return;
+  var dt=Math.min(.05,(now-last)/1000);last=now;
+  var sp=stumT>0?speed*.4:speed;
+  world+=sp*dt;dist+=sp*dt/PX;
+  if(stumT>0)stumT-=dt;if(jumpT>0)jumpT-=dt;if(flash>0)flash-=dt;
+  obs.forEach(function(o){if(o.s=="wait"&&o.x-world+RX<RX-30){o.s="miss";trip();}});
+  pops.forEach(function(p){p.t+=dt});pops=pops.filter(function(p){return p.t<.6});
+  var tg=target();
+  ROW.forEach(function(k){keyEls[k].classList.toggle('target',!!tg&&tg.k==k);});
+  hud();draw(tg);
+  if(dist>=TRACKS[ti].len){finish();return;}
+  requestAnimationFrame(loop);
+}
+
+function draw(tg){
+  var W=800,H=360,i;
+  var gr=g.createLinearGradient(0,0,0,H);gr.addColorStop(0,"#8fd3f4");gr.addColorStop(1,"#fff1c9");g.fillStyle=gr;g.fillRect(0,0,W,H);
+  g.fillStyle="#ffe27a";g.beginPath();g.arc(660,70,34,0,7);g.fill();
+  g.fillStyle="#7cc79a";for(i=-1;i<5;i++){var hx=i*260-(world*.15)%260;g.beginPath();g.ellipse(hx+130,GY-10,170,90,0,Math.PI,0);g.fill();}
+  g.fillStyle="#3f9e73";for(i=-1;i<7;i++){var tx=i*170-(world*.4)%170;g.beginPath();g.moveTo(tx,GY-8);g.lineTo(tx+28,GY-70);g.lineTo(tx+56,GY-8);g.fill();}
+  g.fillStyle="#9a6b3c";g.fillRect(0,GY,W,H-GY);g.fillStyle="#6fbf4a";g.fillRect(0,GY,W,10);
+  g.fillStyle="#7d5530";for(i=-1;i<12;i++){g.fillRect(i*90-(world%90),GY+30,40,5);}
+  // obstacles
+  obs.forEach(function(o){
+    var x=o.x-world+RX;if(x<-60||x>W+60)return;
+    if(o.s=="clear"&&x<RX-80)return;
+    var c=COL[o.k],isT=tg===o;
+    g.globalAlpha=o.s=="miss"?.5:1;
+    g.fillStyle="#8a8f98";g.beginPath();g.moveTo(x-26,GY);g.quadraticCurveTo(x-24,GY-38,x,GY-40);g.quadraticCurveTo(x+24,GY-38,x+26,GY);g.fill();
+    g.fillStyle="#fff";g.strokeStyle=isT?"#1d3b34":c;g.lineWidth=isT?5:4;
+    g.beginPath();g.roundRect(x-22,GY-100,44,44,10);g.fill();g.stroke();
+    g.fillRect(x-3,GY-56,6,18);
+    g.fillStyle="#1d3b34";g.font="bold 28px Verdana";g.textAlign="center";g.fillText(o.k==";"?";":o.k.toUpperCase(),x,GY-68);
+    g.globalAlpha=1;
+  });
+  pops.forEach(function(p){var x=p.x-world+RX;g.strokeStyle=p.c;g.lineWidth=3;g.globalAlpha=1-p.t/.6;g.beginPath();g.arc(x,GY-70,20+p.t*60,0,7);g.stroke();g.globalAlpha=1;});
+  // runner
+  var jh=jumpT>0?Math.sin((1-jumpT/.55)*Math.PI)*95:0,ry=GY-jh,ph=world*.06,st=stumT>0;
+  g.save();g.translate(RX,ry);if(st)g.rotate(Math.sin(performance.now()/60)*.12);
+  g.fillStyle="rgba(0,0,0,.18)";if(jh>=0){g.beginPath();g.ellipse(0,jh,22-jh*.1,5,0,0,7);g.fill();}
+  g.strokeStyle="#1d3b34";g.lineWidth=7;g.lineCap="round";
+  var sw=jumpT>0?.9:Math.sin(ph)*.9;
+  g.beginPath();g.moveTo(0,-34);g.lineTo(Math.sin(sw)*18,0);g.moveTo(0,-34);g.lineTo(-Math.sin(sw)*18,0);g.stroke();
+  g.strokeStyle="#ff7a3d";g.lineWidth=14;g.beginPath();g.moveTo(0,-36);g.lineTo(2,-62);g.stroke();
+  g.strokeStyle="#1d3b34";g.lineWidth=5;var as=jumpT>0?-1.2:Math.sin(ph+3)*.9;
+  g.beginPath();g.moveTo(2,-58);g.lineTo(2+Math.sin(as)*18,-58+Math.cos(as)*14);g.stroke();
+  g.fillStyle="#ffcf9f";g.beginPath();g.arc(4,-76,14,0,7);g.fill();
+  g.fillStyle="#ff7a3d";g.beginPath();g.arc(4,-81,14,Math.PI,0);g.fill();g.fillRect(-12,-82,10,5);
+  g.fillStyle="#1d3b34";g.beginPath();g.arc(9,-76,2,0,7);g.fill();
+  g.restore();
+  if(flash>0){g.fillStyle="rgba(255,80,60,"+flash*.7+")";g.fillRect(0,0,W,H);}
+  // progress bar
+  g.fillStyle="rgba(29,59,52,.25)";g.fillRect(20,16,300,10);g.fillStyle="#1f8a70";g.fillRect(20,16,300*Math.min(1,dist/TRACKS[ti].len),10);
+}
+if(!CanvasRenderingContext2D.prototype.roundRect){CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h){this.rect(x,y,w,h)};}
+// idle backdrop for menu
+(function idle(){if(mode=="menu"||mode=="done"){world+=1.5;if(!obs.length)build();draw(null);}requestAnimationFrame(idle);})();
+})();
+</script>
+</body>
+</html>
